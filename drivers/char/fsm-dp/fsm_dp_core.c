@@ -60,11 +60,15 @@ static void handle_rx_loopback(
 	struct fsm_dp_msghdr *msghdr = job->data;
 	struct iovec iov;
 	int ret;
+	struct fsm_dp_mempool *mempool = drv->mempool[FSM_DP_MEM_TYPE_UL];
 
 	msghdr->type = FSM_DP_MSG_TYPE_LPBK_RSP;
 
 	iov.iov_base = job->data;
 	iov.iov_len = job->length;
+#ifdef FSM_DP_BUFFER_FENCING
+	fsm_dp_set_buf_state(msghdr, FSM_DP_BUF_STATE_KERNEL_XMIT_DMA);
+#endif
 	ret = fsm_dp_tx(drv, &iov, 1, 0);
 	if (ret != 1) {
 		FSM_DP_ERROR("%s: failed to send response\n", __func__);
@@ -76,7 +80,7 @@ static void handle_rx_loopback(
 	return;
 
 free_rxbuf:
-	fsm_dp_mempool_put_buf(drv->mempool[FSM_DP_MEM_TYPE_UL], job->data);
+	fsm_dp_mempool_put_buf(mempool, msghdr);
 }
 
 static void handle_tx_loopback(
@@ -126,6 +130,9 @@ static void handle_tx_loopback(
 	}
 	memcpy(dst, job->data, job->length);
 	offset = vaddr_offset(dst, mempool->mem.loc.page_base);
+#ifdef FSM_DP_BUFFER_FENCING
+	fsm_dp_set_buf_state(dst, FSM_DP_BUF_STATE_KERNEL_RECVCMP_MSGQ_TO_APP);
+#endif
 	if (fsm_dp_ring_write(&rxq->ring, offset, 0)) {
 		drv->loopback.stats.tx_err++;
 		FSM_DP_ERROR("%s: rx enqueue failed!\n", __func__);
@@ -412,6 +419,10 @@ void fsm_dp_rx(struct fsm_dp_drv *pdrv, void *addr, unsigned int length)
 		goto free_rxbuf;
 	}
 
+#ifdef FSM_DP_BUFFER_FENCING
+	fsm_dp_set_buf_state(msghdr,
+			FSM_DP_BUF_STATE_KERNEL_RECVCMP_MSGQ_TO_APP);
+#endif
 	offset = vaddr_offset(addr, mempool->mem.loc.page_base);
 	if (fsm_dp_ring_write(&rxq->ring, offset, 0)) {
 		FSM_DP_ERROR("%s: failed to enqueue rx packet\n", __func__);

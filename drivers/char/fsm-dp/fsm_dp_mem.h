@@ -32,6 +32,7 @@ struct fsm_dp_mem {
 	unsigned int buf_cnt;		/* buffer counter */
 	unsigned int buf_sz;		/* buffer size */
 	unsigned int buf_headroom_sz;	/* headroom unused for now */
+	unsigned int buf_overhead_sz;	/* buffer overhead size */
 };
 
 struct fsm_dp_ring_opstats {
@@ -218,5 +219,20 @@ static inline unsigned int calc_ring_size(unsigned int elements)
 	}
 	return 0;
 }
+
+/* set buffer state, ptr: pointing to beginging of buffer user data */
+static inline void fsm_dp_set_buf_state(void *ptr, enum fsm_dp_buf_state state)
+{
+	struct fsm_dp_buf_cntrl *pf = (ptr - FSM_DP_L1_CACHE_BYTES);
+
+	pf->state = state;
+}
+
+/* get true buffer size which includes size for user space and control  */
+static inline uint32_t fsm_dp_buf_true_size(struct fsm_dp_mem *mem)
+{
+	return (mem->buf_sz + mem->buf_overhead_sz);
+}
+
 
 #endif /* __FSM_DP_MEM_H__ */

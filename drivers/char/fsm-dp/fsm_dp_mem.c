@@ -343,13 +343,16 @@ static int fsm_dp_mem_init(
 	struct fsm_dp_mempool *mempool = fsm_dp_mem_to_mempool(mem);
 	struct fsm_dp_drv *pdrv = mempool->drv;
 
-	if (__dma_alloc(pdrv->dev, bufcnt * bufsz, cookie, &mem->loc)) {
+	mem->buf_cnt = bufcnt;
+	mem->buf_sz = bufsz;
+	mem->buf_overhead_sz = FSM_DP_L1_CACHE_BYTES;
+
+	if (__dma_alloc(pdrv->dev, bufcnt * fsm_dp_buf_true_size(mem),
+			cookie, &mem->loc)) {
 		FSM_DP_ERROR("%s: failed to allocate DMA memory\n", __func__);
 		return -ENOMEM;
 	}
 
-	mem->buf_cnt = bufcnt;
-	mem->buf_sz = bufsz;
 	return 0;
 }
 
@@ -372,6 +375,7 @@ static int fsm_dp_mem_get_cfg(
 
 	cfg->buf_sz = mem->buf_sz;
 	cfg->buf_cnt = mem->buf_cnt;
+	cfg->buf_overhead_sz = FSM_DP_L1_CACHE_BYTES;
 	return 0;
 }
 
@@ -381,6 +385,7 @@ static void fsm_dp_mempool_init(struct fsm_dp_mempool *mempool)
 	struct fsm_dp_ring *ring = &mempool->ring;
 	fsm_dp_ring_element_data_t element_data;
 	int i;
+	struct fsm_dp_buf_cntrl *p;
 
 	switch (mempool->type) {
 	case FSM_DP_MEM_TYPE_DL_L1_DATA:
@@ -389,9 +394,15 @@ static void fsm_dp_mempool_init(struct fsm_dp_mempool *mempool)
 	case FSM_DP_MEM_TYPE_UL:
 		element_data = mem->loc.page_off;
 		for (i = 0; i < mem->buf_cnt; i++) {
-			ring->element[i].element_data = element_data;
+			p = (struct fsm_dp_buf_cntrl *)
+				(mem->loc.page_base + element_data);
+			p->signature = FSM_DP_BUFFER_SIG;
+			p->fence = FSM_DP_BUFFER_FENCE_SIG;
+			p->state = FSM_DP_BUF_STATE_KERNEL_FREE;
+			ring->element[i].element_data =
+				element_data + mem->buf_overhead_sz;
 			ring->element[i].element_ctrl = 0; /* entry valid */
-			element_data += mem->buf_sz;
+			element_data += fsm_dp_buf_true_size(mem);
 		}
 		*ring->cons_head = 0;
 		*ring->cons_tail = 0;
@@ -473,7 +484,7 @@ struct fsm_dp_mempool *fsm_dp_mempool_alloc(
 
 	if (unlikely(!buf_sz || !buf_cnt || !fsm_dp_mem_type_is_valid(type)))
 		return NULL;
-	if (unlikely(((ULONG_MAX) / buf_sz) < buf_cnt))
+	if (unlikely(((ULONG_MAX) / (buf_sz + FSM_DP_L1_CACHE_BYTES) < buf_cnt)))
 		return NULL;
 
 	ring_sz = calc_ring_size(buf_cnt);
@@ -553,10 +564,38 @@ int fsm_dp_mempool_put_buf(struct fsm_dp_mempool *mempool, void *vaddr)
 	}
 
 	offset = vaddr_offset(vaddr, mem->loc.base);
+
 	/* align to buffer boundary */
-	offset -= offset % mem->buf_sz;
+	offset -= offset % fsm_dp_buf_true_size(mem);
+
 	/* align to page boundary for mmap */
 	offset += mem->loc.page_off;
+
+#ifdef FSM_DP_BUFFER_FENCING
+	struct fsm_dp_buf_cntrl *p = (struct fsm_dp_buf_cntrl *)
+					(mem->loc.page_base + offset);
+
+	if (p->signature != FSM_DP_BUFFER_SIG) {
+		mempool->stats.invalid_buf_put++;
+		FSM_DP_ERROR("%s: mempool %p type %d buffer at "
+			"offset %ld corrupted, sig %x, exp %x\n",
+			__func__, mempool, mempool->type,
+			offset, p->signature, FSM_DP_BUFFER_SIG);
+		return -EINVAL;
+	}
+	if (p->fence != FSM_DP_BUFFER_FENCE_SIG) {
+		mempool->stats.invalid_buf_put++;
+		FSM_DP_ERROR("%s: mempool %p type %d buffer at "
+			"offset %ld corrupted, fence %x, exp %x\n",
+			__func__, mempool, mempool->type,
+			offset, p->fence, FSM_DP_BUFFER_FENCE_SIG);
+		FSM_DP_ERROR("%s: vaddr %p  p %p\n",
+			__func__, vaddr, p);
+		return NULL;
+	}
+	p->state = FSM_DP_BUF_STATE_KERNEL_FREE;
+#endif
+	offset += sizeof(struct fsm_dp_buf_cntrl);
 
 	ret = fsm_dp_ring_write(&mempool->ring, (fsm_dp_ring_element_data_t)offset, 0);
 	if (ret)
@@ -586,11 +625,33 @@ void *fsm_dp_mempool_get_buf(struct fsm_dp_mempool *mempool)
 	mem = &mempool->mem;
 	ptr = (char *)mem->loc.page_base + val;
 	offset = vaddr_offset(ptr, mem->loc.base);
-	if (offset % mem->buf_sz) {
+	if ((offset - mem->buf_overhead_sz) % fsm_dp_buf_true_size(mem)) {
 		mempool->stats.invalid_buf_get++;
-		FSM_DP_ERROR("%s: get unaligned buffer from ring\n", __func__);
+		FSM_DP_ERROR("%s: get unaligned buffer "
+			"from ring, buf true size %d offset %ld\n",
+			__func__, fsm_dp_buf_true_size(mem), offset);
 		return NULL;
 	}
+#ifdef FSM_DP_BUFFER_FENCING
+	struct fsm_dp_buf_cntrl *p = (ptr -  mem->buf_overhead_sz);
+
+	if (p->signature !=  FSM_DP_BUFFER_SIG) {
+		mempool->stats.invalid_buf_get++;
+		FSM_DP_ERROR("%s: mempool type %ld buffer "
+			"at %d corrupted, %x, exp %x\n",
+			__func__, offset, mempool->type,
+			p->signature, FSM_DP_BUFFER_SIG);
+		return NULL;
+	}
+	if (p->fence !=  FSM_DP_BUFFER_FENCE_SIG) {
+		mempool->stats.invalid_buf_get++;
+		FSM_DP_ERROR("%s: mempool type %ld "
+			"buffer at %d corrupted, fence %x, exp %x\n",
+			__func__, offset, mempool->type,
+			p->fence, FSM_DP_BUFFER_FENCE_SIG);
+		return NULL;
+	}
+#endif
 	mempool->stats.buf_get++;
 	return ptr;
 }

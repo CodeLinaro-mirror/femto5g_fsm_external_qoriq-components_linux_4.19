@@ -92,13 +92,73 @@ struct fsm_dp_msghdr {
 	uint16_t sequence : 16;
 } __attribute__((packed));
 
+
+#define FSM_DP_BUFFER_FENCE_SIG 0xDEADFACE
+#define FSM_DP_BUFFER_SIG       0xDAC0FFEE
+#define FSM_DP_BUFFER_FENCING   1
+
+/*
+ * A buffer control is an area with size of
+ * L1_CACHE_BYTES (64 bytes for arm64).
+ * It is placed at the beginging
+ * of a buffer.
+ * fsm_dp_buf_cntrl is placed at the
+ * control area. The last
+ * 4 bytes of the area is a fence defined as
+ * FSM_DP_BUFFER_FENCE_SIG
+ * The size of fsm_dp_buf_cntrl
+ * should be less  L1_CACHE_BYTES.
+ * User data is placed after the
+ * control area of L1_CACHE_BYTES size.
+ * User data starts with fsm_dp_msghdr
+ */
+#define FSM_DP_L1_CACHE_BYTES 64  /*
+				   * FSM_DP_L1_CACHE_BYTES is the same as
+				   * L1_CACHE_BYTES.
+				   * fsm_dp_ioctl.h is included in
+				   * the applications,
+				   * The symbol L1_CACHE_BYTES is defined in the
+				   * kernel, not be used here. Therefore,
+				   * it is redefined.
+				   */
+struct fsm_dp_buf_cntrl {
+	uint32_t signature;
+	uint32_t state;
+	struct timespec ts;
+	unsigned char spare[FSM_DP_L1_CACHE_BYTES
+		- sizeof(uint32_t) /* signature */
+		- sizeof(uint32_t) /* state */
+		- sizeof(struct timespec) /* ts */
+		- sizeof(uint32_t)];/* fence */
+	uint32_t fence;
+} __attribute__((packed));
+
+enum fsm_dp_buf_state {
+	FSM_DP_BUF_STATE_KERNEL_FREE,
+	FSM_DP_BUF_STATE_KERNEL_ALLOC_RECV_DMA,
+	FSM_DP_BUF_STATE_KERNEL_RECVCMP_MSGQ_TO_APP,
+	FSM_DP_BUF_STATE_KERNEL_XMIT_DMA,
+	FSM_DP_BUF_STATE_KERNEL_XMIT_DMA_COMP,
+	FSM_DP_BUF_STATE_USER_FREE,
+	FSM_DP_BUF_STATE_USER_ALLOC,
+	FSM_DP_BUF_STATE_USER_RECV,
+	FSM_DP_BUF_STATE_LAST,
+};
+
 typedef unsigned long fsm_dp_ring_element_data_t;
 typedef unsigned int fsm_dp_ring_index_t;
 
 struct fsm_dp_ring_element {
 	unsigned long element_ctrl; /* 1 entry not valid, 0 valid */
 				    /* Other bits for control flags: tbd */
+
 	fsm_dp_ring_element_data_t element_data;
+				/*
+				 * If the ring is used for
+				 * fsm dp buffer management,
+				 * ring data is pointing to
+				 * a buffer fsm_dp_msghdr area
+				 */
 };
 
 typedef struct fsm_dp_ring_element fsm_dp_ring_element_t;
@@ -121,8 +181,12 @@ struct fsm_dp_ring_cfg {
 
 struct fsm_dp_mem_cfg {
 	struct fsm_dp_mmap_cfg mmap;	/* mmap parameters */
-	__u32 buf_sz;			/* size of buffer */
+	__u32 buf_sz;			/* size of buffer for user data */
 	__u32 buf_cnt;			/* number of buffer */
+	__u32 buf_overhead_sz;		/*
+					 * size of buffer overhead,
+					 * on top of buf_sz.
+					 */
 };
 
 struct fsm_dp_mempool_cfg {
@@ -187,6 +251,32 @@ static inline const char *fsm_dp_rx_type_to_str(enum fsm_dp_rx_type type)
 	case FSM_DP_RX_TYPE_LPBK: return "LOOPBACK";
 	default: return "unknown";
 	}
+}
+
+
+static inline const char *fsm_dp_buf_state_to_str(enum fsm_dp_buf_state state)
+{
+	switch (state) {
+	case FSM_DP_BUF_STATE_KERNEL_FREE:
+		return "KERNEL FREE";
+	case FSM_DP_BUF_STATE_KERNEL_ALLOC_RECV_DMA:
+		return "KERNEL ALLOC RECV DMA";
+	case FSM_DP_BUF_STATE_KERNEL_RECVCMP_MSGQ_TO_APP:
+		return "KERNEL RECV CMP MSGQ TO APP";
+	case FSM_DP_BUF_STATE_KERNEL_XMIT_DMA:
+		return "KERNEL XMIT DMA";
+	case FSM_DP_BUF_STATE_KERNEL_XMIT_DMA_COMP:
+		return "KERNEL XMIT DMA COMP";
+	case FSM_DP_BUF_STATE_USER_FREE:
+		return "USER FREE";
+	case FSM_DP_BUF_STATE_USER_ALLOC:
+		return "USER ALLOC";
+	case FSM_DP_BUF_STATE_USER_RECV:
+		return "USER RECV";
+	case FSM_DP_BUF_STATE_LAST:
+	default:
+		return "unknown";
+	};
 }
 
 #endif /* __FSM_DP_IOCTL_H__ */

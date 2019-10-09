@@ -122,6 +122,40 @@ static int __cdev_tx(
 			((struct fsm_dp_msghdr *)iov[n].iov_base)->sequence =
 				atomic_inc_return(&pdrv->tx_seqnum);
 		}
+#ifdef FSM_DP_BUFFER_FENCING
+		{
+			struct fsm_dp_buf_cntrl *p;
+			struct fsm_dp_mempool *
+				mempool = *mempool_vma->pp_mempool;
+			unsigned long offset = iov[n].iov_base -
+					(mempool->mem.loc.page_base +
+					mempool->mem.loc.page_off);
+
+			offset = offset %
+				fsm_dp_buf_true_size(&mempool->mem);
+			p = (struct fsm_dp_buf_cntrl *)
+				(iov[n].iov_base - offset);
+			if (p->signature != FSM_DP_BUFFER_SIG) {
+				FSM_DP_ERROR("%s: mempool type %d buffer at "
+					"kernel addr %p corrupted, %x, exp %x\n",
+					__func__,
+					(*mempool_vma->pp_mempool)->type,
+					iov[n].iov_base, p->signature,
+						FSM_DP_BUFFER_SIG);
+				return -EINVAL;
+			}
+			if (p->fence != FSM_DP_BUFFER_FENCE_SIG) {
+				FSM_DP_ERROR("%s: mempool type %d buffer at "
+					"kernel addr %p corrupted, fence %x, "
+					"exp %x\n", __func__,
+					(*mempool_vma->pp_mempool)->type,
+					iov[n].iov_base, p->fence,
+					FSM_DP_BUFFER_FENCE_SIG);
+				return -EINVAL;
+			}
+			p->state = FSM_DP_BUF_STATE_KERNEL_XMIT_DMA;
+		}
+#endif
 
 		FSM_DP_DEBUG("%s: start tx, kaddr=%p len=%lu\n",
 			  __func__, iov[n].iov_base, iov[n].iov_len);
@@ -805,7 +839,7 @@ int fsm_dp_cdev_init(struct fsm_dp_drv *pdrv)
 	mutex_init(&pdrv->cdev_lock);
 	INIT_LIST_HEAD(&pdrv->cdev_head);
 
-	pr_info("FSM-DP: cdev initialized\n");
+	pr_info("FSM-DP: cdev initialized. __cdev_tx at 0x%p\n", __cdev_tx);
 	return 0;
 
 del_cdev:

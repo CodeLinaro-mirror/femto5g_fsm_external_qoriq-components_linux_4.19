@@ -244,7 +244,6 @@ static int debugfs_mem_data_read(struct seq_file *s, void *unused)
 		unsigned int offset = __mem_offset[mempool->type];
 		unsigned int i, j;
 		unsigned char *data = (unsigned char *)mem->loc.base + offset;
-
 		if (n > (mem->loc.size - offset))
 			n = mem->loc.size - offset;
 
@@ -500,6 +499,63 @@ static int debugfs_mempool_status_show(struct seq_file *s, void *unused)
 	return 0;
 }
 DEFINE_DEBUGFS_OPS(debugfs_mempool_status, debugfs_mempool_status_show, NULL);
+
+static int debugfs_mempool_state_show(struct seq_file *s, void *unused)
+{
+	struct fsm_dp_mempool *mempool =
+		*((struct fsm_dp_mempool **)s->private);
+	unsigned long state_cnt[FSM_DP_BUF_STATE_LAST];
+	unsigned long buf_bad = 0;
+	unsigned long unknown_state = 0;
+	int i;
+
+	memset(state_cnt, 0, sizeof(state_cnt));
+	if (mempool) {
+		struct fsm_dp_mem *mem = &mempool->mem;
+		struct fsm_dp_buf_cntrl *p;
+		unsigned int off;
+
+		off = mem->loc.page_off;
+		for (i = 0; i < mem->buf_cnt; i++) {
+
+			p = (struct fsm_dp_buf_cntrl *)
+				(mem->loc.page_base + off);
+#ifdef FSM_DP_BUFFER_FENCING
+			if (p->signature != FSM_DP_BUFFER_SIG ||
+					p->fence != FSM_DP_BUFFER_FENCE_SIG)
+				buf_bad++;
+			else if (p->state >= FSM_DP_BUF_STATE_LAST)
+#else
+			if (p->state >= FSM_DP_BUF_STATE_LAST)
+#endif
+				unknown_state++;
+			else
+				state_cnt[p->state]++;
+
+			off += fsm_dp_buf_true_size(mem);
+		}
+
+		seq_printf(s, "Total Buf:                  %u\n",
+			   mem->buf_cnt);
+		seq_printf(s, "Buf Real Size:              %u\n",
+			   mem->buf_sz + mem->buf_overhead_sz);
+		seq_printf(s, "Buf Corrupted:              %lu\n",
+			   buf_bad);
+		seq_printf(s, "Buf Unknown State:          %lu\n",
+			   unknown_state);
+
+		for (i = 0; i < FSM_DP_BUF_STATE_LAST; i++) {
+			if (state_cnt[i]) {
+				seq_printf(s, "Buf State %s:        ",
+						fsm_dp_buf_state_to_str(i));
+				seq_printf(s, "                    %lu\n",
+						state_cnt[i]);
+			}
+		}
+	}
+	return 0;
+}
+DEFINE_DEBUGFS_OPS(debugfs_mempool_state, debugfs_mempool_state_show, NULL);
 
 static int debugfs_mempool_active_show(struct seq_file *s, void *unused)
 {
@@ -789,6 +845,12 @@ static int debugfs_create_mempool_dir(
 		entry = debugfs_create_file("status", 0444, dentry,
 					    &drv->mempool[type],
 					    &debugfs_mempool_status_ops);
+		if (!entry)
+			return -ENOMEM;
+
+		entry = debugfs_create_file("state", 0444, dentry,
+					    &drv->mempool[type],
+					    &debugfs_mempool_state_ops);
 		if (!entry)
 			return -ENOMEM;
 	}

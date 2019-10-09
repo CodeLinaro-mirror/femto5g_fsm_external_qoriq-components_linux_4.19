@@ -45,6 +45,8 @@ static int __mhi_rx_replenish(
 			}
 			mhi->buf_array[i] = buf;
 			mhi->size_array[i] = mempool->mem.buf_sz;
+			fsm_dp_set_buf_state(buf,
+				FSM_DP_BUF_STATE_KERNEL_ALLOC_RECV_DMA);
 		}
 		if (i == 0)
 			return 0;
@@ -56,9 +58,10 @@ static int __mhi_rx_replenish(
 						mhi->flag_array,
 						to_xfer);
 		if (ret) {
-			for (i = 0; i < to_xfer; i++)
+			for (i = 0; i < to_xfer; i++) {
 				fsm_dp_mempool_put_buf(mempool,
-							mhi->buf_array[i]);
+						mhi->buf_array[i]);
+			}
 			mhi->stats.rx_replenish_err++;
 			FSM_DP_ERROR("%s: failed to load rx buf!\n",
 				  __func__);
@@ -106,6 +109,19 @@ static void __mhi_ul_xfer_cb(
 	switch (mempool->type) {
 	case FSM_DP_MEM_TYPE_DL_L1_DATA:
 		/* For DL_L1_DATA, don't put buffer back to the ring */
+#ifdef FSM_DP_BUFFER_FENCING
+		{
+			struct fsm_dp_buf_cntrl *p;
+			unsigned long offset;
+
+			offset = addr -
+				(mempool->mem.loc.page_base +
+				mempool->mem.loc.page_off);
+			offset % fsm_dp_buf_true_size(&mempool->mem);
+			p = (struct fsm_dp_buf_cntrl *) (addr - offset);
+			p->state = FSM_DP_BUF_STATE_KERNEL_XMIT_DMA_COMP;
+		}
+#endif
 		break;
 	default:
 		fsm_dp_mempool_put_buf(mempool, addr);
