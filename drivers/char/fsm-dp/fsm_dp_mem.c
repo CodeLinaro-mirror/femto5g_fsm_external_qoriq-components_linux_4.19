@@ -38,6 +38,7 @@ static inline void fsm_dp_mem_loc_set(
 	loc->page_base = (void *)((unsigned long)base & PAGE_MASK);
 	loc->page_off = (unsigned int)((unsigned long)base & (PAGE_SIZE - 1));
 	loc->cookie = mmap_cookie;
+	loc->dma_mapped = false;
 }
 
 static inline int __alloc(
@@ -352,7 +353,6 @@ static int fsm_dp_mem_init(
 		FSM_DP_ERROR("%s: failed to allocate DMA memory\n", __func__);
 		return -ENOMEM;
 	}
-
 	return 0;
 }
 
@@ -361,6 +361,10 @@ static void fsm_dp_mem_cleanup(struct fsm_dp_mem *mem)
 	struct fsm_dp_mempool *mempool = fsm_dp_mem_to_mempool(mem);
 	struct fsm_dp_drv *pdrv = mempool->drv;
 
+	if (mem->loc.dma_mapped)
+		dma_unmap_single(pdrv->mhi.mhi_dev->mhi_cntrl->dev,
+				mem->loc.dma_addr, mem->loc.size,
+				mem->loc.direction);
 	__dma_free(pdrv->dev, &mem->loc);
 	memset(mem, 0, sizeof(*mem));
 }
@@ -420,7 +424,8 @@ static struct fsm_dp_mempool *__fsm_dp_mempool_alloc(
 	enum fsm_dp_mem_type type,
 	unsigned int buf_sz,
 	unsigned int buf_cnt,
-	unsigned int ring_sz)
+	unsigned int ring_sz,
+	bool may_map)
 {
 	struct fsm_dp_mempool *mempool;
 	unsigned int cookie;
@@ -440,6 +445,8 @@ static struct fsm_dp_mempool *__fsm_dp_mempool_alloc(
 		goto cleanup;
 	}
 
+	if (may_map && fsm_dp_mempool_dma_map(pdrv, mempool, type))
+		goto cleanup_mem;
 	cookie = MMAP_COOKIE(type, FSM_DP_MMAP_TYPE_RING);
 	if (fsm_dp_ring_init(&mempool->ring, ring_sz, cookie)) {
 		FSM_DP_ERROR("%s: failed to initialize ring\n", __func__);
@@ -473,11 +480,39 @@ static void fsm_dp_mempool_release(struct fsm_dp_mempool *mempool)
 	}
 }
 
+int fsm_dp_mempool_dma_map(
+	struct fsm_dp_drv *pdrv,
+	struct fsm_dp_mempool *mpool,
+	enum fsm_dp_mem_type type)
+{
+	enum dma_data_direction direction;
+	struct device *dev;	/* device for iommu ops */
+
+	if (mpool->mem.loc.dma_mapped)
+		return 0;
+	dev = pdrv->mhi.mhi_dev->mhi_cntrl->dev;
+	if (type == FSM_DP_MEM_TYPE_UL)
+		direction = DMA_FROM_DEVICE;
+	else
+		direction = DMA_TO_DEVICE;
+	mpool->mem.loc.dma_addr =
+		dma_map_single(pdrv->mhi.mhi_dev->mhi_cntrl->dev,
+			mpool->mem.loc.base,
+			mpool->mem.loc.size,
+			direction);
+	if (dma_mapping_error(dev, mpool->mem.loc.dma_addr))
+		return -ENOMEM;
+	mpool->mem.loc.dma_mapped = true;
+	mpool->mem.loc.direction = direction;
+	return 0;
+}
+
 struct fsm_dp_mempool *fsm_dp_mempool_alloc(
 	struct fsm_dp_drv *pdrv,
 	enum fsm_dp_mem_type type,
 	unsigned int buf_sz,
-	unsigned int buf_cnt)
+	unsigned int buf_cnt,
+	bool may_dma_map)
 {
 	struct fsm_dp_mempool *mempool;
 	unsigned int ring_sz;
@@ -505,7 +540,8 @@ struct fsm_dp_mempool *fsm_dp_mempool_alloc(
 		goto mempool_hold;
 	}
 
-	mempool = __fsm_dp_mempool_alloc(pdrv, type, buf_sz, buf_cnt, ring_sz);
+	mempool = __fsm_dp_mempool_alloc(pdrv, type, buf_sz,
+					buf_cnt, ring_sz, may_dma_map);
 	if (mempool == NULL)
 		goto done;
 

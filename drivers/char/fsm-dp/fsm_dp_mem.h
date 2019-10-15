@@ -25,6 +25,9 @@ struct fsm_dp_mem_loc {
 	size_t size;		/* size of memory chunk */
 	dma_addr_t addr;	/* physical address */
 	unsigned int cookie;	/* mmap cookie */
+	bool dma_mapped;
+	dma_addr_t dma_addr;	/* dma addr */
+	enum dma_data_direction direction;
 };
 
 struct fsm_dp_mem {
@@ -92,7 +95,8 @@ struct fsm_dp_mempool *fsm_dp_mempool_alloc(
 	struct fsm_dp_drv *pdrv,
 	enum fsm_dp_mem_type type,
 	unsigned int buf_sz,
-	unsigned int buf_cnt);
+	unsigned int buf_cnt,
+	bool may_dma_map);
 
 void fsm_dp_mempool_free(struct fsm_dp_mempool *mempool);
 
@@ -146,6 +150,11 @@ struct fsm_dp_mempool *fsm_dp_find_mempool(
 	struct fsm_dp_drv *drv,
 	void *addr,
 	bool tx);
+
+int fsm_dp_mempool_dma_map(
+	struct fsm_dp_drv *pdrv,
+	struct fsm_dp_mempool *mpool,
+	enum fsm_dp_mem_type type);
 
 /* inline */
 static __always_inline bool __ulong_in_range(
@@ -233,6 +242,5 @@ static inline uint32_t fsm_dp_buf_true_size(struct fsm_dp_mem *mem)
 {
 	return (mem->buf_sz + mem->buf_overhead_sz);
 }
-
 
 #endif /* __FSM_DP_MEM_H__ */

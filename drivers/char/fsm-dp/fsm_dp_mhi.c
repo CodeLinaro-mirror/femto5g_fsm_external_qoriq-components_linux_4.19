@@ -43,25 +43,44 @@ static int __mhi_rx_replenish(
 				outofbuf = true;
 				break;
 			}
-			mhi->buf_array[i] = buf;
-			mhi->size_array[i] = mempool->mem.buf_sz;
 			fsm_dp_set_buf_state(buf,
 				FSM_DP_BUF_STATE_KERNEL_ALLOC_RECV_DMA);
+			mhi->ul_buf_array[i] = buf;
+			mhi->ul_size_array[i] = mempool->mem.buf_sz;
+			mhi->ul_flag_array[i] = MHI_EOT;
+			if (mempool->mem.loc.dma_mapped) {
+				unsigned long offset;
+
+				offset = buf - mempool->mem.loc.base;
+				mhi->ul_dma_addr_array[i] = (void *)
+					(mempool->mem.loc.dma_addr + offset);
+				/*
+				 * set flag to indicate buf is
+				 * dma handle instead of
+				 * kernal virtual addr.
+				 * We use coherent memory.
+				 */
+				mhi->ul_flag_array[i] |=
+					(MHI_FLAGS_DMA_ADDR |
+						MHI_FLAGS_COHERENT_ADDR);
+			}
 		}
 		if (i == 0)
 			return 0;
 		to_xfer = i;
 		ret = mhi_queue_n_transfer(mhi_dev,
 						DMA_FROM_DEVICE,
-						mhi->buf_array,
-						mhi->size_array,
-						mhi->flag_array,
-						NULL,
+						mhi->ul_buf_array,
+						mhi->ul_size_array,
+						mhi->ul_flag_array,
+						mhi->ul_dma_addr_array,
 						to_xfer);
 		if (ret) {
 			for (i = 0; i < to_xfer; i++) {
+				fsm_dp_set_buf_state(mhi->ul_buf_array[i],
+						FSM_DP_BUF_STATE_KERNEL_FREE);
 				fsm_dp_mempool_put_buf(mempool,
-						mhi->buf_array[i]);
+							mhi->ul_buf_array[i]);
 			}
 			mhi->stats.rx_replenish_err++;
 			FSM_DP_ERROR("%s: failed to load rx buf!\n",
@@ -190,7 +209,6 @@ static int fsm_dp_mhi_probe(
 {
 	struct fsm_dp_drv *pdrv = __pdrv;
 	int ret;
-	int i;
 
 	FSM_DP_DEBUG("%s: probing mhi\n", __func__);
 
@@ -206,8 +224,6 @@ static int fsm_dp_mhi_probe(
 
 	pdrv->mhi.mhi_dev = mhi_dev;
 	pdrv->mhi.mhi_destroyed = false;
-	for (i = 0; i < FSM_DP_MAX_IOV_SIZE; i++)
-		pdrv->mhi.flag_array[i] = MHI_EOT;
 	spin_lock_init(&pdrv->mhi.rx_lock);
 	spin_lock_init(&pdrv->mhi.tx_lock);
 	ret = fsm_dp_mhi_rx_replenish(pdrv);

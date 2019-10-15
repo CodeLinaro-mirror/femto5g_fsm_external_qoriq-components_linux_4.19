@@ -39,14 +39,18 @@ struct fsm_dp_mhi {
 	spinlock_t tx_lock;
 	/*
 	 * the following are for needed storage
-	 * for doing replenish at context of
-	 * of fsm_dp_mhi_rx_replenish callback.
-	 * No locking is necessary.
+	 * for mhi_queue_n_transfer.
 	 */
-	void *buf_array[FSM_DP_MAX_IOV_SIZE];
-	size_t size_array[FSM_DP_MAX_IOV_SIZE];
-	enum MHI_FLAGS flag_array[FSM_DP_MAX_IOV_SIZE];
 	bool mhi_destroyed;
+	void *ul_buf_array[FSM_DP_MAX_IOV_SIZE];
+	size_t ul_size_array[FSM_DP_MAX_IOV_SIZE];
+	enum MHI_FLAGS ul_flag_array[FSM_DP_MAX_IOV_SIZE];
+	dma_addr_t ul_dma_addr_array[FSM_DP_MAX_IOV_SIZE];
+
+	void *dl_buf_array[FSM_DP_MAX_IOV_SIZE];
+	size_t dl_size_array[FSM_DP_MAX_IOV_SIZE];
+	enum MHI_FLAGS dl_flag_array[FSM_DP_MAX_IOV_SIZE];
+	dma_addr_t dl_dma_addr_array[FSM_DP_MAX_IOV_SIZE];
 };
 
 int fsm_dp_mhi_init(struct fsm_dp_drv *pdrv);
@@ -55,24 +59,24 @@ void fsm_dp_mhi_cleanup(struct fsm_dp_drv *pdrv);
 int fsm_dp_mhi_rx_replenish(struct fsm_dp_drv *drv);
 
 static inline int fsm_dp_mhi_n_tx(struct fsm_dp_mhi *mhi,
-				void *msg_array[],
-				size_t msglen_array[],
-				enum MHI_FLAGS flag_array[], unsigned int num)
+				unsigned int num)
 {
 	int ret;
 
 	if (mhi->mhi_destroyed)
 		return -ENODEV;
-	spin_lock_bh(&mhi->tx_lock);
+
 	ret = mhi_queue_n_transfer(mhi->mhi_dev,
-				 DMA_TO_DEVICE,
-				 msg_array, msglen_array,
-				 flag_array, NULL, num);
+				DMA_TO_DEVICE,
+				mhi->dl_buf_array,
+				mhi->dl_size_array,
+				mhi->dl_flag_array,
+				mhi->dl_dma_addr_array,
+				num);
 	if (!ret)
 		mhi->stats.tx_cnt += num;
 	else
 		mhi->stats.tx_err += num;
-	spin_unlock_bh(&mhi->tx_lock);
 	return ret;
 }
 

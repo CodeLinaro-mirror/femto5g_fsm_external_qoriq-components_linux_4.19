@@ -59,6 +59,8 @@ static void handle_rx_loopback(
 {
 	struct fsm_dp_msghdr *msghdr = job->data;
 	struct iovec iov;
+	unsigned int iov_flag = 0;
+	dma_addr_t dma_addr;
 	int ret;
 	struct fsm_dp_mempool *mempool = drv->mempool[FSM_DP_MEM_TYPE_UL];
 
@@ -66,10 +68,8 @@ static void handle_rx_loopback(
 
 	iov.iov_base = job->data;
 	iov.iov_len = job->length;
-#ifdef FSM_DP_BUFFER_FENCING
 	fsm_dp_set_buf_state(msghdr, FSM_DP_BUF_STATE_KERNEL_XMIT_DMA);
-#endif
-	ret = fsm_dp_tx(drv, &iov, 1, 0);
+	ret = fsm_dp_tx(drv, &iov, 1, 0, &iov_flag, &dma_addr);
 	if (ret != 1) {
 		FSM_DP_ERROR("%s: failed to send response\n", __func__);
 		drv->loopback.stats.rx_err++;
@@ -457,7 +457,8 @@ static int fsm_dp_rx_init(struct fsm_dp_drv *pdrv)
 		DEFAULT_FSM_MEM_BUF_SIZE,
 		(of_prop) ?
 		be32_to_cpu(of_prop[1]) :
-		DEFAULT_FSM_MEM_UL_BUF_CNT);
+		DEFAULT_FSM_MEM_UL_BUF_CNT,
+		false); /* no dma map yet since io dev is not ready */
 	if (pdrv->mempool[FSM_DP_MEM_TYPE_UL] == NULL) {
 		FSM_DP_ERROR("%s: failed to allocate UL memory pool!\n",
 			  __func__);
@@ -496,11 +497,10 @@ int fsm_dp_tx(
 	struct fsm_dp_drv *pdrv,
 	struct iovec *iov,
 	unsigned int iov_nr,
-	unsigned int flag)
+	unsigned int flag,
+	unsigned int iov_flag[],
+	dma_addr_t dma_addr_array[])
 {
-	enum MHI_FLAGS mhi_flag[FSM_DP_MAX_SG_IOV_SIZE];
-	size_t msg_len[FSM_DP_MAX_SG_IOV_SIZE];
-	void *msg_buf[FSM_DP_MAX_SG_IOV_SIZE];
 	int ret, n;
 	unsigned int num, to_send;
 	int j;
@@ -534,26 +534,30 @@ int fsm_dp_tx(
 			return -EINVAL;
 		}
 	}
-
+	spin_lock_bh(&pdrv->mhi.tx_lock);
 	to_send = 0;
 	for (n = 0, to_send = iov_nr; to_send > 0; ) {
-		if (to_send > FSM_DP_MAX_SG_IOV_SIZE)
-			num = FSM_DP_MAX_SG_IOV_SIZE;
+		if (to_send > FSM_DP_MAX_IOV_SIZE)
+			num = FSM_DP_MAX_IOV_SIZE;
 		else
 			num = to_send;
 		for (j = 0; j < num; j++) {
 			if ((flag & FSM_DP_TX_FLAG_SG) && n != (iov_nr - 1))
-				mhi_flag[j] = MHI_CHAIN;
+				pdrv->mhi.dl_flag_array[j] = MHI_CHAIN;
 			else
-				mhi_flag[j] =  MHI_EOT;
-			msg_len[j] = iov[n].iov_len;
-			msg_buf[j] = iov[n].iov_base;
+				pdrv->mhi.dl_flag_array[j] =  MHI_EOT;
+			pdrv->mhi.dl_size_array[j] = iov[n].iov_len;
+			pdrv->mhi.dl_buf_array[j] = iov[n].iov_base;
+			if (iov_flag[n]) {
+				pdrv->mhi.dl_flag_array[j] |=
+					(MHI_FLAGS_DMA_ADDR |
+						MHI_FLAGS_COHERENT_ADDR);
+				pdrv->mhi.dl_dma_addr_array[j] =
+					dma_addr_array[n];
+			}
 			n++;
 		}
 		ret = fsm_dp_mhi_n_tx(&pdrv->mhi,
-				    msg_buf,
-				    msg_len,
-				    mhi_flag,
 				    num);
 		if (ret) {
 			pdrv->stats.tx_err++;
@@ -566,7 +570,7 @@ int fsm_dp_tx(
 		pdrv->stats.tx_cnt += (iov_nr - to_send);
 	else if (!to_send)
 		pdrv->stats.tx_cnt++;
-
+	spin_unlock_bh(&pdrv->mhi.tx_lock);
 	return n;
 }
 
@@ -670,6 +674,11 @@ static int __init fsm_dp_probe(struct platform_device *pdev)
 		goto cleanup;
 
 	ret = fsm_dp_mhi_init(pdrv);
+	if (ret)
+		goto cleanup;
+
+	ret = fsm_dp_mempool_dma_map(pdrv, pdrv->mempool[FSM_DP_MEM_TYPE_UL],
+					FSM_DP_MEM_TYPE_UL);
 	if (ret)
 		goto cleanup;
 

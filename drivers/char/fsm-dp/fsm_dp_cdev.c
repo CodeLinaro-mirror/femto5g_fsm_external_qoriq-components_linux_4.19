@@ -89,9 +89,13 @@ static int __cdev_tx(
 	struct fsm_dp_drv *pdrv = cdev->pdrv;
 	struct fsm_dp_mempool_vma *mempool_vma;
 	struct iovec iov[FSM_DP_MAX_IOV_SIZE];
+	dma_addr_t dma_addr[FSM_DP_MAX_IOV_SIZE];
 	unsigned int n;
 	int ret;
 	unsigned int flag = 0;
+	unsigned int iov_flag[FSM_DP_MAX_IOV_SIZE];
+	struct fsm_dp_mempool *mempool;
+	unsigned long off;
 
 	FSM_DP_DEBUG("%s: iov_nr=%u\n", __func__, iov_nr);
 	if (iov_nr > FSM_DP_MAX_IOV_SIZE)
@@ -111,6 +115,7 @@ static int __cdev_tx(
 				__func__, iov[n].iov_base, iov[n].iov_len);
 			return -EINVAL;
 		}
+		mempool = *mempool_vma->pp_mempool;
 
 		/* User passes in the pointer to message payload */
 		iov[n].iov_base = usr_to_kern_vaddr(mempool_vma,
@@ -125,8 +130,6 @@ static int __cdev_tx(
 #ifdef FSM_DP_BUFFER_FENCING
 		{
 			struct fsm_dp_buf_cntrl *p;
-			struct fsm_dp_mempool *
-				mempool = *mempool_vma->pp_mempool;
 			unsigned long offset = iov[n].iov_base -
 					(mempool->mem.loc.page_base +
 					mempool->mem.loc.page_off);
@@ -156,6 +159,17 @@ static int __cdev_tx(
 			p->state = FSM_DP_BUF_STATE_KERNEL_XMIT_DMA;
 		}
 #endif
+		if (mempool->mem.loc.dma_mapped &&
+				cdev->tx_mode != TX_MODE_LOOPBACK) {
+			off = iov[n].iov_base - mempool->mem.loc.base;
+			dma_addr[n] = mempool->mem.loc.dma_addr + off;
+			iov_flag[n] = 1; /*
+					  * set flag to indicate iov_base is
+					  * dma handle instead of
+					  * kernal virtual addr
+					  */
+		} else
+			iov_flag[n] = 0;
 
 		FSM_DP_DEBUG("%s: start tx, kaddr=%p len=%lu\n",
 			  __func__, iov[n].iov_base, iov[n].iov_len);
@@ -166,7 +180,7 @@ static int __cdev_tx(
 	if (cdev->tx_mode == TX_MODE_LOOPBACK)
 		flag |= FSM_DP_TX_FLAG_LOOPBACK;
 
-	ret = fsm_dp_tx(pdrv, iov, iov_nr, flag);
+	ret = fsm_dp_tx(pdrv, iov, iov_nr, flag, iov_flag, dma_addr);
 	return ret;
 }
 
@@ -182,7 +196,8 @@ static int __cdev_ioctl_mempool_alloc(
 	if (copy_from_user(&req, (void __user *)ioarg, sizeof(req)))
 		return -EFAULT;
 
-	mempool = fsm_dp_mempool_alloc(pdrv, req.type, req.buf_sz, req.buf_num);
+	mempool = fsm_dp_mempool_alloc(pdrv, req.type, req.buf_sz, req.buf_num,
+				true); /* may do dma_map */
 	if (mempool == NULL) {
 		FSM_DP_ERROR("%s: fsm_mem_alloc failed!\n", __func__);
 		return -ENOMEM;
