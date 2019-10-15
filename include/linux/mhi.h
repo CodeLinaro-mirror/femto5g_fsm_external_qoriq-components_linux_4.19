@@ -54,12 +54,22 @@ enum MHI_DEBUG_LEVEL {
  * @MHI_EOB: End of buffer for bulk transfer
  * @MHI_EOT: End of transfer
  * @MHI_CHAIN: Linked transfer
+ * @MHI_FLAGS_DMA_ADDR: DMA address available
  */
 enum MHI_FLAGS {
 	MHI_EOB,
 	MHI_EOT,
 	MHI_CHAIN,
+	/*
+	 * Make sure there is no conflict of MHI_FLAGS_DMA_ADDR, and
+	 * MHI_FLAGS_COHERENT_ADDR with other MHI_FLAGS.
+	 * Internally, MHI_FLAGS are used as bit fields.
+	 */
+	MHI_FLAGS_COHERENT_ADDR = 1 << 6,
+	MHI_FLAGS_DMA_ADDR = 1 << 7,
 };
+
+
 
 /**
  * enum mhi_device_type - Device types
@@ -327,9 +337,11 @@ struct mhi_device {
 	int (*dl_xfer)(struct mhi_device *, struct mhi_chan *, void *,
 		       size_t, enum MHI_FLAGS);
 	int (*ul_n_xfer)(struct mhi_device *, struct mhi_chan *, void **,
-		       size_t *, enum MHI_FLAGS *, unsigned int);
+			size_t *, enum MHI_FLAGS *, dma_addr_t *,
+			unsigned int);
 	int (*dl_n_xfer)(struct mhi_device *, struct mhi_chan *, void **,
-		       size_t *, enum MHI_FLAGS *, unsigned int);
+			size_t *, enum MHI_FLAGS *, dma_addr_t *,
+			unsigned int);
 	void (*status_cb)(struct mhi_device *, enum MHI_CB);
 };
 
@@ -424,14 +436,17 @@ static inline int mhi_queue_n_transfer(struct mhi_device *mhi_dev,
 				     void **buf_array,
 				     size_t *len_array,
 				     enum MHI_FLAGS *mflags_array,
+				     dma_addr_t *dma_addr_array,
 				     unsigned int num)
 {
 	if (dir == DMA_TO_DEVICE)
 		return mhi_dev->ul_n_xfer(mhi_dev, mhi_dev->ul_chan,
-				buf_array, len_array, mflags_array, num);
+				buf_array, len_array, mflags_array,
+				dma_addr_array, num);
 	else
 		return mhi_dev->dl_n_xfer(mhi_dev, mhi_dev->dl_chan,
-				buf_array, len_array, mflags_array, num);
+				buf_array, len_array, mflags_array,
+				dma_addr_array, num);
 }
 
 static inline void *mhi_controller_get_devdata(struct mhi_controller *mhi_cntrl)

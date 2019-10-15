@@ -67,33 +67,11 @@ static inline int fsm_dp_mhi_n_tx(struct fsm_dp_mhi *mhi,
 	ret = mhi_queue_n_transfer(mhi->mhi_dev,
 				 DMA_TO_DEVICE,
 				 msg_array, msglen_array,
-				 flag_array, num);
+				 flag_array, NULL, num);
 	if (!ret)
 		mhi->stats.tx_cnt += num;
 	else
 		mhi->stats.tx_err += num;
-	spin_unlock_bh(&mhi->tx_lock);
-	return ret;
-}
-
-static inline int fsm_dp_mhi_tx(struct fsm_dp_mhi *mhi,
-				void *msg,
-				unsigned int msglen,
-				enum MHI_FLAGS flag)
-{
-	int ret;
-
-	if (mhi->mhi_destroyed)
-		return -ENODEV;
-	spin_lock_bh(&mhi->tx_lock);
-	ret = mhi_queue_transfer(mhi->mhi_dev,
-				 DMA_TO_DEVICE,
-				 msg, msglen,
-				 flag);
-	if (!ret)
-		mhi->stats.tx_cnt++;
-	else
-		mhi->stats.tx_err++;
 	spin_unlock_bh(&mhi->tx_lock);
 	return ret;
 }

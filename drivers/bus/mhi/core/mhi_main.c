@@ -418,6 +418,7 @@ int mhi_queue_skb(struct mhi_device *mhi_dev,
 	buf_info->len = len;
 	if (assert_wake)
 		buf_info->wake_put = true;
+	buf_info->dma_flag = false;
 	ret = mhi_cntrl->map_single(mhi_cntrl, buf_info);
 	if (ret)
 		goto map_error;
@@ -462,13 +463,15 @@ int mhi_gen_n_tre(struct mhi_controller *mhi_cntrl,
 		void *cb_array[],
 		size_t buf_len_array[],
 		enum MHI_FLAGS flags_array[],
+		dma_addr_t dma_addr_array[],
 		unsigned int num)
 {
 	struct mhi_ring *buf_ring, *tre_ring;
 	struct mhi_tre *mhi_tre;
 	struct mhi_buf_info *buf_info;
 	int eot, eob, chain, bei;
-	int ret;
+	int phy;
+	int ret = 0;
 	void *save_tre_wp;
 	void *save_buf_wp;
 	int i;
@@ -477,7 +480,6 @@ int mhi_gen_n_tre(struct mhi_controller *mhi_cntrl,
 	tre_ring = &mhi_chan->tre_ring;
 	save_tre_wp = buf_ring->wp;
 	save_buf_wp = tre_ring->wp;
-
 	i = 0;
 	while (num-- > 0) {
 		buf_info = buf_ring->wp;
@@ -486,9 +488,25 @@ int mhi_gen_n_tre(struct mhi_controller *mhi_cntrl,
 		buf_info->wp = tre_ring->wp;
 		buf_info->dir = mhi_chan->dir;
 		buf_info->len = buf_len_array[i];
+		phy = (!!(flags_array[i] & MHI_FLAGS_DMA_ADDR)
+					&& dma_addr_array);
+		if (phy)
+			buf_info->dma_flag = MHI_DMA_PHY;
+		else
+			buf_info->dma_flag = 0;
+
 		if (mhi_chan->dir == DMA_TO_DEVICE)
 			buf_info->wake_put = (num == 0); /* last or not*/
-		ret = mhi_cntrl->map_single(mhi_cntrl, buf_info);
+		if (phy) {
+			buf_info->p_addr = dma_addr_array[i];
+			if (flags_array[i] & MHI_FLAGS_COHERENT_ADDR)
+				buf_info->dma_flag |= MHI_DMA_COHERENT;
+			else
+				dma_sync_single_for_device(mhi_cntrl->dev,
+					buf_info->p_addr, buf_info->len,
+					buf_info->dir);
+		} else
+			ret = mhi_cntrl->map_single(mhi_cntrl, buf_info);
 		if (ret) {
 			buf_ring->wp = save_tre_wp;
 			tre_ring->wp = save_buf_wp;
@@ -525,7 +543,7 @@ int mhi_gen_tre(struct mhi_controller *mhi_cntrl,
 	struct mhi_tre *mhi_tre;
 	struct mhi_buf_info *buf_info;
 	int eot, eob, chain, bei;
-	int ret;
+	int ret = 0;
 
 	buf_ring = &mhi_chan->buf_ring;
 	tre_ring = &mhi_chan->tre_ring;
@@ -536,6 +554,7 @@ int mhi_gen_tre(struct mhi_controller *mhi_cntrl,
 	buf_info->wp = tre_ring->wp;
 	buf_info->dir = mhi_chan->dir;
 	buf_info->len = buf_len;
+	buf_info->dma_flag = false;
 	if (mhi_chan->dir == DMA_TO_DEVICE)
 		buf_info->wake_put = true;
 
@@ -611,6 +630,7 @@ int mhi_queue_n_buf_not_supported(struct mhi_device *mhi_dev,
 		  void *buf_array[],
 		  size_t len_array[],
 		  enum MHI_FLAGS mflags_array[],
+		  dma_addr_t  dma_addr_array[],
 		  unsigned int num)
 {
 	return -EPERM;
@@ -621,6 +641,7 @@ int mhi_queue_n_buf(struct mhi_device *mhi_dev,
 		  void *buf_array[],
 		  size_t len_array[],
 		  enum MHI_FLAGS mflags_array[],
+		  dma_addr_t  dma_addr_array[],
 		  unsigned int num)
 {
 	struct mhi_controller *mhi_cntrl = mhi_dev->mhi_cntrl;
@@ -644,7 +665,8 @@ int mhi_queue_n_buf(struct mhi_device *mhi_dev,
 		return -ENOMEM;
 
 	ret = mhi_chan->gen_n_tre(mhi_cntrl, mhi_chan, buf_array,
-				buf_array, len_array, mflags_array, num);
+				buf_array, len_array, mflags_array,
+				dma_addr_array, num);
 	if (unlikely(ret))
 		return ret;
 	mhi_deliver_bufs(mhi_cntrl, mhi_chan);
@@ -930,8 +952,13 @@ static int parse_xfer_event(struct mhi_controller *mhi_cntrl,
 			else
 				xfer_len = buf_info->len;
 			wake_put = buf_info->wake_put;
-			mhi_cntrl->unmap_single(mhi_cntrl, buf_info);
-
+			if (buf_info->dma_flag & MHI_DMA_PHY) {
+				if (!(buf_info->dma_flag & MHI_DMA_COHERENT))
+					dma_sync_single_for_cpu(mhi_cntrl->dev,
+						buf_info->p_addr, buf_info->len,
+							buf_info->dir);
+			} else
+				mhi_cntrl->unmap_single(mhi_cntrl, buf_info);
 			result.buf_addr = buf_info->cb_buf;
 			result.bytes_xferd = xfer_len;
 			mhi_del_ring_element(mhi_cntrl, buf_ring);

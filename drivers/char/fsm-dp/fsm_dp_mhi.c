@@ -56,6 +56,7 @@ static int __mhi_rx_replenish(
 						mhi->buf_array,
 						mhi->size_array,
 						mhi->flag_array,
+						NULL,
 						to_xfer);
 		if (ret) {
 			for (i = 0; i < to_xfer; i++) {
