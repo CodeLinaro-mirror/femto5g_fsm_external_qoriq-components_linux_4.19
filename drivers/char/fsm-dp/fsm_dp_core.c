@@ -55,21 +55,21 @@ static void fsm_dp_test_cleanup(struct fsm_dp_drv *pdrv)
 
 static void handle_rx_loopback(
 	struct fsm_dp_drv *drv,
-	struct fsm_dp_loopback_job *job)
+	struct iovec *iov,
+	unsigned int *iov_flag,
+	unsigned int num)
 {
-	struct fsm_dp_msghdr *msghdr = job->data;
-	struct iovec iov;
-	unsigned int iov_flag = 0;
-	dma_addr_t dma_addr;
+	struct fsm_dp_msghdr *msghdr;
 	int ret;
+	int i;
 	struct fsm_dp_mempool *mempool = drv->mempool[FSM_DP_MEM_TYPE_UL];
 
-	msghdr->type = FSM_DP_MSG_TYPE_LPBK_RSP;
-
-	iov.iov_base = job->data;
-	iov.iov_len = job->length;
-	fsm_dp_set_buf_state(msghdr, FSM_DP_BUF_STATE_KERNEL_XMIT_DMA);
-	ret = fsm_dp_tx(drv, &iov, 1, 0, &iov_flag, &dma_addr);
+	for (i = 0; i < num; i++) {
+		msghdr = (struct fsm_dp_msghdr *) iov[i].iov_base;
+		msghdr->type = FSM_DP_MSG_TYPE_LPBK_RSP;
+		fsm_dp_set_buf_state(msghdr, FSM_DP_BUF_STATE_KERNEL_XMIT_DMA);
+	}
+	ret = fsm_dp_tx(drv, iov, num, 0, iov_flag, NULL);
 	if (ret) {
 		FSM_DP_DEBUG("%s: failed to send response\n", __func__);
 		drv->loopback.stats.rx_err++; /* update error stats */
@@ -80,7 +80,8 @@ static void handle_rx_loopback(
 	return;
 
 free_rxbuf:
-	fsm_dp_mempool_put_buf(mempool, msghdr);
+	for (i = 0; i < num; i++)
+		fsm_dp_mempool_put_buf(mempool, iov[i].iov_base);
 }
 
 static void handle_tx_loopback(
@@ -157,10 +158,14 @@ static void loopback_cb(struct work_struct *work)
 	struct list_head q;
 	struct fsm_dp_loopback_job *job;
 	unsigned long flags;
+	struct iovec iov[FSM_DP_MAX_IOV_SIZE];
+	unsigned int iov_flag[FSM_DP_MAX_IOV_SIZE];
+	int num = 0;
 
 	INIT_LIST_HEAD(&q);
 
 	task->stats.run++;
+
 	while (1) {
 		spin_lock_irqsave(&task->lock, flags);
 		list_splice_tail_init(&q, &task->free_q);
@@ -169,13 +174,24 @@ static void loopback_cb(struct work_struct *work)
 
 		if (list_empty(&q))
 			break;
+
 		list_for_each_entry(job, &q, list) {
-			if (job->rx_loopback)
-				handle_rx_loopback(drv, job);
-			else
+			if (job->rx_loopback) {
+				iov[num].iov_base = job->data;
+				iov[num].iov_len = job->length;
+				iov_flag[num] = 0;
+				num++;
+				if (num >= FSM_DP_MAX_IOV_SIZE) {
+					handle_rx_loopback(drv, iov,
+						iov_flag, num);
+					num = 0;
+				}
+			} else
 				handle_tx_loopback(drv, job);
 		}
 	}
+	if (num)
+		handle_rx_loopback(drv, iov, iov_flag, num);
 }
 
 static int tx_loopback(
