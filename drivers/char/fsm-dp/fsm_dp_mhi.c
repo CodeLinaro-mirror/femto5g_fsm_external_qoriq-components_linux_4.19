@@ -41,14 +41,17 @@ static int __mhi_rx_replenish(
 				mhi->stats.rx_out_of_buf++;
 				FSM_DP_DEBUG("%s: out of rx buffer!\n", __func__);
 				outofbuf = true;
-				break;
+				buf = mempool->dummy_buf;
 			}
-			fsm_dp_set_buf_state(buf,
-				FSM_DP_BUF_STATE_KERNEL_ALLOC_RECV_DMA);
+			FSM_DP_ASSERT(!buf, "can not alloc buffer");
+			if (buf !=  mempool->dummy_buf)
+				fsm_dp_set_buf_state(buf,
+					FSM_DP_BUF_STATE_KERNEL_ALLOC_RECV_DMA);
 			mhi->ul_buf_array[i] = buf;
 			mhi->ul_size_array[i] = mempool->mem.buf_sz;
 			mhi->ul_flag_array[i] = MHI_EOT;
-			if (mempool->mem.loc.dma_mapped) {
+			if (mempool->mem.loc.dma_mapped &&
+					buf != mempool->dummy_buf) {
 				unsigned long offset;
 
 				offset = buf - mempool->mem.loc.base;
@@ -65,9 +68,6 @@ static int __mhi_rx_replenish(
 						MHI_FLAGS_COHERENT_ADDR);
 			}
 		}
-		if (i == 0)
-			return 0;
-		to_xfer = i;
 		ret = mhi_queue_n_transfer(mhi_dev,
 						DMA_FROM_DEVICE,
 						mhi->ul_buf_array,
@@ -77,10 +77,14 @@ static int __mhi_rx_replenish(
 						to_xfer);
 		if (ret) {
 			for (i = 0; i < to_xfer; i++) {
-				fsm_dp_set_buf_state(mhi->ul_buf_array[i],
+				if (mhi->ul_buf_array[i] !=
+					mempool->dummy_buf) {
+					fsm_dp_set_buf_state(
+						mhi->ul_buf_array[i],
 						FSM_DP_BUF_STATE_KERNEL_FREE);
-				fsm_dp_mempool_put_buf(mempool,
-							mhi->ul_buf_array[i]);
+					fsm_dp_mempool_put_buf(mempool,
+						mhi->ul_buf_array[i]);
+				}
 			}
 			mhi->stats.rx_replenish_err++;
 			FSM_DP_ERROR("%s: failed to load rx buf!\n",
@@ -161,6 +165,10 @@ static void __mhi_dl_xfer_cb(
 		  __func__, result->buf_addr, result->dir,
 		  result->bytes_xferd, result->transaction_status);
 
+	if (result->buf_addr == mempool->dummy_buf) {
+		mhi->stats.rx_outofbuf_drop++;
+		return;
+	}
 	if (result->transaction_status == -ENOTCONN) {
 		mhi->stats.rx_err++;
 		fsm_dp_mempool_put_buf(mempool, result->buf_addr);

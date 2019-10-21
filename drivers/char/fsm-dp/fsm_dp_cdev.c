@@ -181,6 +181,7 @@ static int __cdev_tx(
 		flag |= FSM_DP_TX_FLAG_LOOPBACK;
 
 	ret = fsm_dp_tx(pdrv, iov, iov_nr, flag, iov_flag, dma_addr);
+	/* if error return, user should return buffers */
 	return ret;
 }
 
@@ -253,9 +254,6 @@ static int __cdev_ioctl_tx(struct fsm_dp_cdev *cdev, unsigned long ioarg)
 		return -EINVAL;
 
 	ret = __cdev_tx(cdev, iov.iov_base, iov.iov_len, false);
-	if (!ret)
-		ret = -EIO;
-
 	return ret;
 }
 
@@ -271,12 +269,7 @@ static int __cdev_ioctl_sg_tx(struct fsm_dp_cdev *cdev, unsigned long ioarg)
 		return -EINVAL;
 
 	ret = __cdev_tx(cdev, iov.iov_base, iov.iov_len, true);
-	if (ret < 0)
-		return ret;
-	else if (ret != iov.iov_len)
-		return -EIO;
-
-	return 1;
+	return ret;
 }
 
 static int __cdev_ioctl_rx_getcfg(struct fsm_dp_cdev *cdev, unsigned long ioarg)

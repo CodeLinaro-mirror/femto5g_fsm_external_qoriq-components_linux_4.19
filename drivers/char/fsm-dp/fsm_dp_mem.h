@@ -84,6 +84,7 @@ struct fsm_dp_mempool {
 	struct fsm_dp_mem mem;
 	atomic_t ref;
 	struct fsm_dp_mempool_stats stats;
+	char *dummy_buf;
 };
 
 struct fsm_dp_mempool_task {

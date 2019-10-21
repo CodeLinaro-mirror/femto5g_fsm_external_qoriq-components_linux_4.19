@@ -70,9 +70,9 @@ static void handle_rx_loopback(
 	iov.iov_len = job->length;
 	fsm_dp_set_buf_state(msghdr, FSM_DP_BUF_STATE_KERNEL_XMIT_DMA);
 	ret = fsm_dp_tx(drv, &iov, 1, 0, &iov_flag, &dma_addr);
-	if (ret != 1) {
-		FSM_DP_ERROR("%s: failed to send response\n", __func__);
-		drv->loopback.stats.rx_err++;
+	if (ret) {
+		FSM_DP_DEBUG("%s: failed to send response\n", __func__);
+		drv->loopback.stats.rx_err++; /* update error stats */
 		goto free_rxbuf;
 	}
 
@@ -508,6 +508,7 @@ int fsm_dp_tx(
 	if (unlikely(!pdrv || !iov || !iov_nr))
 		return -EINVAL;
 
+	ret = 0;
 	if (unlikely(flag & FSM_DP_TX_FLAG_LOOPBACK)) {
 		for (n = 0; n < iov_nr; n++) {
 			ret = tx_loopback(pdrv,
@@ -519,7 +520,7 @@ int fsm_dp_tx(
 			}
 			pdrv->stats.tx_cnt++;
 		}
-		return n;
+		return 0;
 	}
 
 	if (!fsm_dp_mhi_is_ready(&pdrv->mhi)) {
@@ -571,7 +572,7 @@ int fsm_dp_tx(
 	else if (!to_send)
 		pdrv->stats.tx_cnt++;
 	spin_unlock_bh(&pdrv->mhi.tx_lock);
-	return n;
+	return ret;
 }
 
 static int fsm_dp_core_init(struct fsm_dp_drv *pdrv)

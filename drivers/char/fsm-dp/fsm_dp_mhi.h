@@ -30,6 +30,7 @@ struct fsm_dp_mhi_stats {
 
 	unsigned long rx_replenish;
 	unsigned long rx_replenish_err;
+	unsigned long rx_outofbuf_drop;
 };
 
 struct fsm_dp_mhi {

@@ -74,6 +74,11 @@ struct vm_area_struct;
 #define FSM_DP_TX_FLAG_SG	0x01
 #define FSM_DP_TX_FLAG_LOOPBACK	0x02
 
+#define FSM_DP_ASSERT(cond, msg) do { \
+	if (cond) \
+		panic(msg); \
+} while (0)
+
 /*
  * vma mapping for mempool which includes
  * - buffer memory region

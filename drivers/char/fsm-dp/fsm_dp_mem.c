@@ -439,6 +439,18 @@ static struct fsm_dp_mempool *__fsm_dp_mempool_alloc(
 	mempool->drv = pdrv;
 	mempool->type = type;
 
+	/*
+	 * allocate dummy buffer for out of buffer condition
+	 * if FSM_DP_MEM_TYPE_UL pool
+	 */
+	if (type == FSM_DP_MEM_TYPE_UL) {
+		mempool->dummy_buf = kzalloc(buf_sz, GFP_KERNEL);
+		if (IS_ERR(mempool->dummy_buf)) {
+			mempool->dummy_buf = NULL;
+			goto cleanup;
+		}
+	}
+
 	cookie = MMAP_COOKIE(type, FSM_DP_MMAP_TYPE_MEM);
 	if (fsm_dp_mem_init(&mempool->mem, buf_cnt, buf_sz, cookie)) {
 		FSM_DP_ERROR("%s: failed to initialize memory\n", __func__);
@@ -463,6 +475,7 @@ static struct fsm_dp_mempool *__fsm_dp_mempool_alloc(
 cleanup_mem:
 	fsm_dp_mem_cleanup(&mempool->mem);
 cleanup:
+	kfree(mempool->dummy_buf);
 	kfree(mempool);
 	return NULL;
 }
@@ -474,6 +487,7 @@ static void fsm_dp_mempool_release(struct fsm_dp_mempool *mempool)
 
 		fsm_dp_mem_cleanup(&mempool->mem);
 		fsm_dp_ring_cleanup(&mempool->ring);
+		kfree(mempool->dummy_buf);
 		kfree(mempool);
 
 		FSM_DP_DEBUG("%s: mempool is freed, type=%u\n", __func__, type);
