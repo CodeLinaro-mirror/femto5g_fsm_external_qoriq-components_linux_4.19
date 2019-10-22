@@ -232,6 +232,12 @@ static int fsm_dp_mhi_probe(
 		return ret;
 	}
 
+	if (pdrv->mempool[FSM_DP_MEM_TYPE_UL])
+		FSM_DP_INFO("%s: fsm_dp_mempool_dma_map FSM_DP_MEM_TYPE_UL "
+			"pool , ret %d\n", __func__,
+			fsm_dp_mempool_dma_map(pdrv,
+				pdrv->mempool[FSM_DP_MEM_TYPE_UL],
+				FSM_DP_MEM_TYPE_UL));
 	FSM_DP_DEBUG("%s: mhi_probed\n", __func__);
 	return 0;
 }

@@ -677,11 +677,6 @@ static int __init fsm_dp_probe(struct platform_device *pdev)
 	if (ret)
 		goto cleanup;
 
-	ret = fsm_dp_mempool_dma_map(pdrv, pdrv->mempool[FSM_DP_MEM_TYPE_UL],
-					FSM_DP_MEM_TYPE_UL);
-	if (ret)
-		goto cleanup;
-
 	ret = fsm_dp_cdev_init(pdrv);
 	if (ret)
 		goto cleanup_mhi;
