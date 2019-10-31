@@ -55,7 +55,7 @@ static int __mhi_rx_replenish(
 				unsigned long offset;
 
 				offset = buf - mempool->mem.loc.base;
-				mhi->ul_dma_addr_array[i] = (void *)
+				mhi->ul_dma_addr_array[i] =
 					(mempool->mem.loc.dma_addr + offset);
 				/*
 				 * set flag to indicate buf is
@@ -131,24 +131,27 @@ static void __mhi_ul_xfer_cb(
 	}
 
 	switch (mempool->type) {
-	case FSM_DP_MEM_TYPE_DL_L1_DATA:
-		/* For DL_L1_DATA, don't put buffer back to the ring */
-#ifdef FSM_DP_BUFFER_FENCING
+	case FSM_DP_MEM_TYPE_UL:
+		fsm_dp_mempool_put_buf(mempool, addr); /* rx loop back */
+		break;
+	default:
 		{
+#ifdef FSM_DP_BUFFER_FENCING
 			struct fsm_dp_buf_cntrl *p;
 			unsigned long offset;
 
 			offset = addr -
 				(mempool->mem.loc.page_base +
 				mempool->mem.loc.page_off);
-			offset % fsm_dp_buf_true_size(&mempool->mem);
+			offset = offset % fsm_dp_buf_true_size(&mempool->mem);
 			p = (struct fsm_dp_buf_cntrl *) (addr - offset);
-			p->state = FSM_DP_BUF_STATE_KERNEL_XMIT_DMA_COMP;
-		}
+			if (p->state == FSM_DP_BUF_STATE_KERNEL_XMIT_DMA)
+				p->state =
+					FSM_DP_BUF_STATE_KERNEL_XMIT_DMA_COMP;
+			p->xmit_status = FSM_DP_XMIT_OK;
+			wmb(); /* make it visible to other CPU */
 #endif
-		break;
-	default:
-		fsm_dp_mempool_put_buf(mempool, addr);
+		}
 		break;
 	}
 }

@@ -121,14 +121,23 @@ struct fsm_dp_msghdr {
 				   * kernel, not be used here. Therefore,
 				   * it is redefined.
 				   */
+/*
+ * xmit_status definition
+ * If xmit errors, defined as -(error code)
+ */
+#define FSM_DP_XMIT_IN_PROGRESS (1)
+#define FSM_DP_XMIT_OK		0
+
 struct fsm_dp_buf_cntrl {
 	uint32_t signature;
 	uint32_t state;
 	struct timespec ts;
+	int32_t xmit_status;
 	unsigned char spare[FSM_DP_L1_CACHE_BYTES
 		- sizeof(uint32_t) /* signature */
 		- sizeof(uint32_t) /* state */
 		- sizeof(struct timespec) /* ts */
+		- sizeof(int32_t) /* xmit_status */
 		- sizeof(uint32_t)];/* fence */
 	uint32_t fence;
 } __attribute__((packed));
@@ -149,8 +158,8 @@ typedef unsigned long fsm_dp_ring_element_data_t;
 typedef unsigned int fsm_dp_ring_index_t;
 
 struct fsm_dp_ring_element {
-	unsigned long element_ctrl; /* 1 entry not valid, 0 valid */
-				    /* Other bits for control flags: tbd */
+	uint64_t element_ctrl;	/* 1 entry not valid, 0 valid */
+				/* Other bits for control flags: tbd */
 
 	fsm_dp_ring_element_data_t element_data;
 				/*

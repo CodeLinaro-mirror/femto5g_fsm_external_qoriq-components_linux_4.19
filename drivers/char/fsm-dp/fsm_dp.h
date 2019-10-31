@@ -208,7 +208,6 @@ int fsm_dp_tx(
 	struct iovec *iov,
 	unsigned int iov_nr,
 	unsigned int flag,
-	unsigned int iov_flag[],
 	dma_addr_t dma_addr[]);
 
 void fsm_dp_rx(struct fsm_dp_drv *pdrv, void *data, unsigned int length);

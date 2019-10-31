@@ -93,9 +93,11 @@ static int __cdev_tx(
 	unsigned int n;
 	int ret;
 	unsigned int flag = 0;
-	unsigned int iov_flag[FSM_DP_MAX_IOV_SIZE];
 	struct fsm_dp_mempool *mempool;
 	unsigned long off;
+#ifdef FSM_DP_BUFFER_FENCING
+	uint32_t iov_off_array[FSM_DP_MAX_IOV_SIZE];
+#endif
 
 	FSM_DP_DEBUG("%s: iov_nr=%u\n", __func__, iov_nr);
 	if (iov_nr > FSM_DP_MAX_IOV_SIZE)
@@ -136,6 +138,7 @@ static int __cdev_tx(
 
 			offset = offset %
 				fsm_dp_buf_true_size(&mempool->mem);
+			iov_off_array[n] = offset;
 			p = (struct fsm_dp_buf_cntrl *)
 				(iov[n].iov_base - offset);
 			if (p->signature != FSM_DP_BUFFER_SIG) {
@@ -157,19 +160,20 @@ static int __cdev_tx(
 				return -EINVAL;
 			}
 			p->state = FSM_DP_BUF_STATE_KERNEL_XMIT_DMA;
+			p->xmit_status = FSM_DP_XMIT_IN_PROGRESS;
 		}
 #endif
 		if (mempool->mem.loc.dma_mapped &&
 				cdev->tx_mode != TX_MODE_LOOPBACK) {
 			off = iov[n].iov_base - mempool->mem.loc.base;
+			/*
+			 * set to indicate iov_base is
+			 * dma handle instead of
+			 * kernal virtual addr
+			 */
 			dma_addr[n] = mempool->mem.loc.dma_addr + off;
-			iov_flag[n] = 1; /*
-					  * set flag to indicate iov_base is
-					  * dma handle instead of
-					  * kernal virtual addr
-					  */
 		} else
-			iov_flag[n] = 0;
+			dma_addr[n] = 0;
 
 		FSM_DP_DEBUG("%s: start tx, kaddr=%p len=%lu\n",
 			  __func__, iov[n].iov_base, iov[n].iov_len);
@@ -180,8 +184,22 @@ static int __cdev_tx(
 	if (cdev->tx_mode == TX_MODE_LOOPBACK)
 		flag |= FSM_DP_TX_FLAG_LOOPBACK;
 
-	ret = fsm_dp_tx(pdrv, iov, iov_nr, flag, iov_flag, dma_addr);
-	/* if error return, user should return buffers */
+	ret = fsm_dp_tx(pdrv, iov, iov_nr, flag, dma_addr);
+
+	if (ret) {
+#ifdef FSM_DP_BUFFER_FENCING
+		struct fsm_dp_buf_cntrl *p;
+
+		for (n = 0; n < iov_nr; n++) {
+			p = (struct fsm_dp_buf_cntrl *)
+				(iov[n].iov_base - iov_off_array[n]);
+			p->state = FSM_DP_BUF_STATE_KERNEL_XMIT_DMA_COMP;
+			p->xmit_status = ret;
+		}
+#endif
+	} else
+		ret = iov_nr;
+	wmb(); /* make other CPU see */
 	return ret;
 }
 

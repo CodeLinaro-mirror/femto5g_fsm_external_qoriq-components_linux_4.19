@@ -403,6 +403,8 @@ static void fsm_dp_mempool_init(struct fsm_dp_mempool *mempool)
 			p->signature = FSM_DP_BUFFER_SIG;
 			p->fence = FSM_DP_BUFFER_FENCE_SIG;
 			p->state = FSM_DP_BUF_STATE_KERNEL_FREE;
+			if (mempool->type != FSM_DP_MEM_TYPE_UL)
+				p->xmit_status = FSM_DP_XMIT_OK;
 			ring->element[i].element_data =
 				element_data + mem->buf_overhead_sz;
 			ring->element[i].element_ctrl = 0; /* entry valid */
@@ -457,7 +459,8 @@ static struct fsm_dp_mempool *__fsm_dp_mempool_alloc(
 		goto cleanup;
 	}
 
-	if (may_map && fsm_dp_mempool_dma_map(pdrv, mempool, type))
+	if (fsm_dp_mhi_is_ready(&pdrv->mhi) && may_map &&
+			fsm_dp_mempool_dma_map(pdrv, mempool, type))
 		goto cleanup_mem;
 	cookie = MMAP_COOKIE(type, FSM_DP_MMAP_TYPE_RING);
 	if (fsm_dp_ring_init(&mempool->ring, ring_sz, cookie)) {
@@ -602,6 +605,9 @@ int fsm_dp_mempool_put_buf(struct fsm_dp_mempool *mempool, void *vaddr)
 	struct fsm_dp_mem *mem;
 	unsigned long offset;
 	int ret;
+#ifdef FSM_DP_BUFFER_FENCING
+	struct fsm_dp_buf_cntrl *p;
+#endif
 
 	if (unlikely(mempool == NULL || vaddr == NULL))
 		return -EINVAL;
@@ -622,9 +628,7 @@ int fsm_dp_mempool_put_buf(struct fsm_dp_mempool *mempool, void *vaddr)
 	offset += mem->loc.page_off;
 
 #ifdef FSM_DP_BUFFER_FENCING
-	struct fsm_dp_buf_cntrl *p = (struct fsm_dp_buf_cntrl *)
-					(mem->loc.page_base + offset);
-
+	p = (struct fsm_dp_buf_cntrl *) (mem->loc.page_base + offset);
 	if (p->signature != FSM_DP_BUFFER_SIG) {
 		mempool->stats.invalid_buf_put++;
 		FSM_DP_ERROR("%s: mempool %p type %d buffer at "
@@ -663,6 +667,9 @@ void *fsm_dp_mempool_get_buf(struct fsm_dp_mempool *mempool)
 	unsigned int flag;
 	unsigned long offset;
 	void *ptr;
+#ifdef FSM_DP_BUFFER_FENCING
+	struct fsm_dp_buf_cntrl *p;
+#endif
 
 	if (unlikely(mempool == NULL))
 		return NULL;
@@ -683,8 +690,7 @@ void *fsm_dp_mempool_get_buf(struct fsm_dp_mempool *mempool)
 		return NULL;
 	}
 #ifdef FSM_DP_BUFFER_FENCING
-	struct fsm_dp_buf_cntrl *p = (ptr -  mem->buf_overhead_sz);
-
+	p = ptr - mem->buf_overhead_sz;
 	if (p->signature !=  FSM_DP_BUFFER_SIG) {
 		mempool->stats.invalid_buf_get++;
 		FSM_DP_ERROR("%s: mempool type %ld buffer "

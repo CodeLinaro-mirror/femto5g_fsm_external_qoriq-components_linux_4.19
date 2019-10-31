@@ -662,7 +662,7 @@ int mhi_queue_n_buf(struct mhi_device *mhi_dev,
 
 	tre_ring = &mhi_chan->tre_ring;
 	if (get_nr_avail_ring_elements(mhi_cntrl, tre_ring) < num)
-		return -ENOMEM;
+		return -EAGAIN;
 
 	ret = mhi_chan->gen_n_tre(mhi_cntrl, mhi_chan, buf_array,
 				buf_array, len_array, mflags_array,
