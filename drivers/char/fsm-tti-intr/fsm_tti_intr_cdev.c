@@ -9,6 +9,12 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
+#include <linux/fs.h>
+#include <linux/mm.h>
+#include <linux/err.h>
+#include <linux/poll.h>
+#include <linux/cdev.h>
+
 #include "fsm_tti_intr.h"
 
 static int fsm_tti_intr_cdev_close(
@@ -63,7 +69,7 @@ static long fsm_tti_intr_cdev_ioctl(
 	}
 
 	switch (iocmd) {
-	case FSM_TTI_SET_SFN_SLOT_INFO_MSG:
+	case FSM_TTI_IOCTL_INITIAL_SFN_SLOT_INFO:
 		if (copy_from_user(tti_drv_cntx->shared_data,
 			(void __user *)ioarg,
 			sizeof(struct fsm_tti_mmap_info))) {
@@ -76,21 +82,19 @@ static long fsm_tti_intr_cdev_ioctl(
 		tti_drv_cntx->is_seeding_done = true;
 
 		/* Update into debugfs stats */
-		tti_drv_cntx->debugfs_stats.initial_sfn =
-			tti_drv_cntx->shared_data->sfn;
-		tti_drv_cntx->debugfs_stats.initial_slot =
-			tti_drv_cntx->shared_data->slot;
+		tti_drv_cntx->debugfs_stats.initial_sfn_slot.sfn_slot =
+			tti_drv_cntx->shared_data->sfn_slot_info.sfn_slot;
+		tti_drv_cntx->debugfs_stats.sfn_slot_seeding_time = ktime_get();
 
 		FSM_TTI_INFO(
 			"FSM-TTI: %s: initial sfn: %u, slot: %u, time:%lld\n",
 			__func__,
-			tti_drv_cntx->shared_data->sfn,
-			tti_drv_cntx->shared_data->slot,
-			ktime_get());
+			tti_drv_cntx->shared_data->sfn_slot_info.sfn,
+			tti_drv_cntx->shared_data->sfn_slot_info.slot,
+			tti_drv_cntx->debugfs_stats.sfn_slot_seeding_time);
 		break;
 	default:
-		tti_drv_cntx->shared_data->sfn = 0;
-		tti_drv_cntx->shared_data->slot = 0;
+		tti_drv_cntx->shared_data->sfn_slot_info.sfn_slot = 0;
 	}
 
 	return 0;
@@ -167,10 +171,10 @@ static int fsm_tti_intr_cdev_mmap(
 static const struct file_operations fsm_tti_intr_cdev_fops = {
 	.owner = THIS_MODULE,
 	.poll = fsm_tti_intr_cdev_poll,
+	.unlocked_ioctl = fsm_tti_intr_cdev_ioctl,
 	.mmap = fsm_tti_intr_cdev_mmap,
 	.open = fsm_tti_intr_cdev_open,
 	.release = fsm_tti_intr_cdev_close,
-	.unlocked_ioctl = fsm_tti_intr_cdev_ioctl
 };
 
 int fsm_tti_cdev_init(struct fsm_tti_intr_drv *tti_intr_drv)

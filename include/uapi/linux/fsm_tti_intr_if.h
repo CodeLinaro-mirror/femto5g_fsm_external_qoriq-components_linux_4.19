@@ -12,24 +12,42 @@
 #ifndef __FSM_TTI_INTR_IF__
 #define __FSM_TTI_INTR_IF__
 
+#include <linux/types.h>
+#include <linux/ioctl.h>
+
 #define FSM_TTI_MONOTONIC_CLOCK_MASK	1000000000
-#define FSM_TTI_SET_SFN_SLOT_INFO_MSG	0xAA /* ioctl command */
+/* ioctl command */
+#define FSM_TTI_IOCTL_BASE			't'
+#define FSM_TTI_IOCTL_INITIAL_SFN_SLOT_INFO	\
+		_IOW(FSM_TTI_IOCTL_BASE, 1, struct fsm_tti_mmap_info)
 
 #define FSM_TTI_MAX_SFN_NUM		1024
 #define FSM_TTI_DEFAULT_MAX_SLOT_NUM	80
 #define FSM_TTI_MAX_SFN_MOD_FACTOR	0x3FF /* equivalent to MOD 1024 */
 
+union sfn_slot_info
+{
+	uint32_t sfn_slot;
+	struct {
+		uint32_t sfn:16;
+		uint32_t slot:16;
+	};
+};
+
 struct fsm_tti_internal_stats {
-	unsigned int		initial_sfn;
-	unsigned int		initial_slot;
+	union sfn_slot_info	initial_sfn_slot;
 	unsigned long long	current_tti_count;
 	unsigned long long	first_tti_recv_time;
 	unsigned long long	current_tti_recv_time;
+	unsigned long long	sfn_slot_seeding_time;
 };
 
 struct fsm_tti_mmap_info {
-	unsigned int	sfn;		/* sfn information range 0-1023 */
-	unsigned int	slot;		/* slot information range 0-79 */
+	/* sfn information range 0-1023 and slot information range 0-79.
+	 * In sfn_slot variable, MSB 16 bit will hold the sfn information
+	 * and LSB 16 bit will hold slot information.
+	 */
+	union sfn_slot_info	sfn_slot_info;
 
 	/* Timestamp Information */
 	unsigned long long	intr_recv_count;

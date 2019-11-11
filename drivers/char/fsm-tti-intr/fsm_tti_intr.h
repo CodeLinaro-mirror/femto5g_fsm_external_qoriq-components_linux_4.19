@@ -16,20 +16,8 @@
 #define __KERNEL__
 #endif
 
-#include <linux/fs.h>
-#include <linux/mm.h>
 #include <linux/cdev.h>
-#include <linux/gpio.h>
 #include <linux/wait.h>
-#include <linux/poll.h>
-#include <linux/kernel.h>
-#include <linux/module.h>
-#include <linux/printk.h>
-#include <linux/device.h>
-#include <linux/of_gpio.h>
-#include <linux/uaccess.h>
-#include <linux/hrtimer.h>
-#include <linux/interrupt.h>
 #include <linux/platform_device.h>
 
 #include <linux/fsm_tti_intr_if.h>

@@ -9,6 +9,13 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
+#include <linux/of.h>
+#include <linux/err.h>
+#include <linux/gpio.h>
+#include <linux/device.h>
+#include <linux/module.h>
+#include <linux/of_gpio.h>
+#include <linux/interrupt.h>
 
 #include "fsm_tti_intr.h"
 
@@ -32,11 +39,16 @@ static irqreturn_t fsm_tti_gpio_irq_handler(int irq, void *irq_data)
 			tti_intr_drv->debugfs_stats.first_tti_recv_time =
 				sdata->abs_recv_time;
 		} else {
-			sdata->slot = (sdata->slot + 1) %
+
+			sdata->sfn_slot_info.slot =
+				(sdata->sfn_slot_info.slot + 1) %
 				FSM_TTI_DEFAULT_MAX_SLOT_NUM;
-			if (sdata->slot == 0)
-				sdata->sfn = (sdata->sfn + 1) &
-					FSM_TTI_MAX_SFN_MOD_FACTOR;
+
+			if (sdata->sfn_slot_info.slot == 0)
+				sdata->sfn_slot_info.sfn =
+				(sdata->sfn_slot_info.sfn + 1) &
+				FSM_TTI_MAX_SFN_MOD_FACTOR;
+
 			/* Make sure sfn/slot is updated before moving ahead */
 			smp_mb();
 		}
@@ -172,13 +184,14 @@ static int __init fsm_tti_intr_probe(struct platform_device *pdev)
 	if (IS_ERR(tti_intr_drv->shared_data)) {
 		FSM_TTI_ERROR("FSM-TTI: %s: failed to alloc shared memory\n",
 			__func__);
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto cleanup;
 	}
 
 	/* initialize char interface to userspace */
 	ret = fsm_tti_cdev_init(tti_intr_drv);
 	if (ret)
-		goto cleanup;
+		goto cleanup_shared_data;
 
 	ret = fsm_tti_debugfs_init(tti_intr_drv);
 	if (ret)
@@ -191,11 +204,15 @@ static int __init fsm_tti_intr_probe(struct platform_device *pdev)
 	tti_intr_drv->is_seeding_done = false;
 	tti_intr_drv->is_poll_enabled = false;
 	tti_intr_drv->is_first_tti_intr = false;
+
 	FSM_TTI_INFO("FSM-TTI: module initialized\n");
 	return 0;
 
 cleanup_cdev:
 	fsm_tti_cdev_cleanup(tti_intr_drv);
+cleanup_shared_data:
+	kfree(tti_intr_drv->shared_data);
+	tti_intr_drv->shared_data = NULL;
 cleanup:
 	kfree(tti_intr_drv);
 	FSM_TTI_ERROR("FSM-TTI: module init failed!\n");

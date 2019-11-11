@@ -10,6 +10,7 @@
  * GNU General Public License for more details.
  */
 
+#include <linux/err.h>
 #include <linux/debugfs.h>
 
 #include "fsm_tti_intr.h"
@@ -42,15 +43,20 @@ static int debugfs_tti_status_show(struct seq_file *s, void *unused)
 
 	seq_puts(s, "  TTI Interrupt Driver\n");
 	seq_printf(s, "  Initial SF Number:                     %d\n",
-		tti_drv_cntx->debugfs_stats.initial_sfn);
+		tti_drv_cntx->debugfs_stats.initial_sfn_slot.sfn);
 	seq_printf(s, "  Initial Slot Number:                   %d\n",
-		tti_drv_cntx->debugfs_stats.initial_slot);
+		tti_drv_cntx->debugfs_stats.initial_sfn_slot.slot);
 	seq_printf(s, "  First Interrupt Receive Time (nsec):   %lld\n",
 		tti_drv_cntx->debugfs_stats.first_tti_recv_time);
 	seq_printf(s, "  Current Interrupt Receive Time (nsec): %lld\n",
 		tti_drv_cntx->debugfs_stats.current_tti_recv_time);
-	seq_printf(s, "  Total Interrupt Receive Count:         %lld\n\n",
+	seq_printf(s, "  Total Interrupt Receive Count:         %lld\n",
 		tti_drv_cntx->debugfs_stats.current_tti_count);
+	seq_printf(s, "  Sfn/Slot seeding time (nsec):          %lld\n",
+		tti_drv_cntx->debugfs_stats.sfn_slot_seeding_time);
+	seq_printf(s, "  Seeding to first TTI delay(nsec):      %lld\n",
+		tti_drv_cntx->debugfs_stats.first_tti_recv_time -
+		tti_drv_cntx->debugfs_stats.sfn_slot_seeding_time);
 
 	return 0;
 }
