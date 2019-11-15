@@ -21,12 +21,6 @@
 
 		/* controller specific configuration */
 		qcom,smmu-cfg = <0x3>;
-		qcom,msm-bus,name = "mhi";
-		qcom,msm-bus,num-cases = <2>;
-		qcom,msm-bus,num-paths = <1>;
-		qcom,msm-bus,vectors-KBps =
-			<45 512 0 0>,
-			<45 512 1200000000 650000000>;
 
 		/* mhi bus specific settings */
 		mhi,max-channels = <106>;
@@ -438,12 +432,6 @@
 
 		/* controller specific configuration */
 		qcom,smmu-cfg = <0x3>;
-		qcom,msm-bus,name = "mhi";
-		qcom,msm-bus,num-cases = <2>;
-		qcom,msm-bus,num-paths = <1>;
-		qcom,msm-bus,vectors-KBps =
-			<45 512 0 0>,
-			<45 512 1200000000 650000000>;
 
 		/* mhi bus specific settings */
 		mhi,max-channels = <106>;
@@ -855,12 +843,6 @@
 
 		/* controller specific configuration */
 		qcom,smmu-cfg = <0x3>;
-		qcom,msm-bus,name = "mhi";
-		qcom,msm-bus,num-cases = <2>;
-		qcom,msm-bus,num-paths = <1>;
-		qcom,msm-bus,vectors-KBps =
-			<100 512 0 0>,
-			<100 512 1200000000 650000000>;
 
 		/* mhi bus specific settings */
 		mhi,max-channels = <106>;
@@ -1273,12 +1255,6 @@
 
 		/* controller specific configuration */
 		qcom,smmu-cfg = <0x3>;
-		qcom,msm-bus,name = "mhi";
-		qcom,msm-bus,num-cases = <2>;
-		qcom,msm-bus,num-paths = <1>;
-		qcom,msm-bus,vectors-KBps =
-			<45 512 0 0>,
-			<45 512 1200000000 650000000>;
 
 		/* mhi bus specific settings */
 		mhi,max-channels = <106>;
