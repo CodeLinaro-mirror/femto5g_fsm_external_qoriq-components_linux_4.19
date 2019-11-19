@@ -1444,9 +1444,8 @@ static int mhi_driver_remove(struct device *dev)
 
 		mhi_chan->ch_state = MHI_CH_STATE_DISABLED;
 
-		/* Do not
-		 * remove associated device
-		 */
+		/* remove associated device */
+		mhi_chan->mhi_dev = NULL;
 
 		mutex_unlock(&mhi_chan->mutex);
 	}
