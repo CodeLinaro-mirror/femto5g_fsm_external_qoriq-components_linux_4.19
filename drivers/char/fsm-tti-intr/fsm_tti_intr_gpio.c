@@ -57,12 +57,12 @@ static irqreturn_t fsm_tti_gpio_irq_handler(int irq, void *irq_data)
 			sdata->intr_recv_count;
 		/* Make sure timestamps are updated before sfn/slot */
 		smp_mb();
-	}
 
-	/* wake up the poll ops */
-	if (tti_intr_drv->is_poll_enabled) {
-		wake_up_interruptible(&tti_intr_drv->tti_poll_waitqueue);
-		tti_intr_drv->is_tti_updated = true;
+		/* wake up the poll ops */
+		if (tti_intr_drv->is_poll_enabled) {
+			tti_intr_drv->is_tti_updated = true;
+			wake_up(&tti_intr_drv->tti_poll_waitqueue);
+		}
 	}
 	return IRQ_HANDLED;
 }
