@@ -31,6 +31,16 @@ static bool fsl_mc_device_match(struct fsl_mc_device *mc_dev,
 
 }
 
+static bool fsl_mc_obj_desc_is_allocatable(struct fsl_mc_obj_desc *obj)
+{
+	if (strcmp(obj->type, "dpmcp") == 0 ||
+	    strcmp(obj->type, "dpcon") == 0 ||
+	    strcmp(obj->type, "dpbp") == 0)
+		return true;
+	else
+		return false;
+}
+
 static int __fsl_mc_device_remove_if_not_in_mc(struct device *dev, void *data)
 {
 	int i;
@@ -153,6 +163,28 @@ static void check_plugged_state_change(struct fsl_mc_device *mc_dev,
 	}
 }
 
+static void fsl_mc_obj_device_add(struct fsl_mc_device *mc_bus_dev,
+				  const char *driver_override,
+				  struct fsl_mc_obj_desc *obj_desc)
+{
+	int error;
+	struct fsl_mc_device *child_dev;
+
+	/*
+	 * Check if device is already known to Linux:
+	 */
+	child_dev = fsl_mc_device_lookup(obj_desc, mc_bus_dev);
+	if (child_dev) {
+		check_plugged_state_change(child_dev, obj_desc);
+		put_device(&child_dev->dev);
+	} else {
+		error = fsl_mc_device_add(obj_desc, NULL, &mc_bus_dev->dev,
+					  driver_override, &child_dev);
+		if (error < 0)
+			return;
+	}
+}
+
 /**
  * dprc_add_new_devices - Adds devices to the logical bus for a DPRC
  *
@@ -172,32 +204,28 @@ static void dprc_add_new_devices(struct fsl_mc_device *mc_bus_dev,
 				 struct fsl_mc_obj_desc *obj_desc_array,
 				 int num_child_objects_in_mc)
 {
-	int error;
 	int i;
 
+	/* probe the allocable objects first */
 	for (i = 0; i < num_child_objects_in_mc; i++) {
-		struct fsl_mc_device *child_dev;
 		struct fsl_mc_obj_desc *obj_desc = &obj_desc_array[i];
 
-		if (strlen(obj_desc->type) == 0)
-			continue;
+		if (strlen(obj_desc->type) > 0 &&
+		    fsl_mc_obj_desc_is_allocatable(obj_desc))
+			fsl_mc_obj_device_add(mc_bus_dev,
+					      driver_override, obj_desc);
+	}
 
-		/*
-		 * Check if device is already known to Linux:
-		 */
-		child_dev = fsl_mc_device_lookup(obj_desc, mc_bus_dev);
-		if (child_dev) {
-			check_plugged_state_change(child_dev, obj_desc);
-			put_device(&child_dev->dev);
-			continue;
-		}
+	for (i = 0; i < num_child_objects_in_mc; i++) {
+		struct fsl_mc_obj_desc *obj_desc = &obj_desc_array[i];
 
-		error = fsl_mc_device_add(obj_desc, NULL, &mc_bus_dev->dev,
-					  driver_override, &child_dev);
-		if (error < 0)
-			continue;
+		if (strlen(obj_desc->type) > 0 &&
+		    !fsl_mc_obj_desc_is_allocatable(obj_desc))
+			fsl_mc_obj_device_add(mc_bus_dev,
+					      driver_override, obj_desc);
 	}
 }
+
 
 /**
  * dprc_scan_objects - Discover objects in a DPRC
